@@ -12,7 +12,7 @@ import hashlib
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-
+import unicodedata
 # Khớp export hợp lệ trong lab (mở rộng khi nhóm thêm doc mới — phải đồng bộ contract).
 ALLOWED_DOC_IDS = frozenset(
     {
@@ -82,6 +82,7 @@ def clean_rows(
     seen_text: set[str] = set()
     cleaned: List[Dict[str, Any]] = []
     seq = 0
+    last_effective_by_doc: dict[str, str] = {}
 
     for raw in rows:
         doc_id = raw.get("doc_id", "")
@@ -89,14 +90,63 @@ def clean_rows(
         eff_raw = raw.get("effective_date", "")
         exported_at = raw.get("exported_at", "")
 
+
+        # RULE_NEW_1: normalize Unicode + remove dangerous whitespace/control chars
+        # metric_impact: làm dedupe ổn định hơn, giảm “same-looking but different codepoints”
+        orig_text = text or ""
+
+        # Unicode normalize (NFC) để chuẩn hoá dấu tiếng Việt
+        text = unicodedata.normalize("NFC", orig_text)
+
+        # Remove BOM, zero-width chars, NBSP; rồi chuẩn hoá whitespace
+        danger_chars = {
+            "\ufeff": "",  # BOM
+            "\u200b": "",  # zero-width space
+            "\u200c": "",  # zero-width non-joiner
+            "\u200d": "",  # zero-width joiner
+            "\u00a0": " ", # NBSP -> space
+        }
+        for ch, repl in danger_chars.items():
+            text = text.replace(ch, repl)
+
+        text = " ".join(text.split())
+
+        if text != orig_text:
+            text += " [cleaned: unicode_norm]"
+# #=============================================================
+
         if doc_id not in ALLOWED_DOC_IDS:
             quarantine.append({**raw, "reason": "unknown_doc_id"})
             continue
+
+
+        # RULE_NEW_2: metadata consistency doc_id vs chunk_text
+        # metric_impact: quarantine_reason=doc_text_mismatch tăng khi inject gán nhầm doc_id
+        t = (text or "").lower()
+
+        doc_keywords = {
+            "policy_refund_v4": ["hoàn tiền", "yêu cầu", "đơn"],
+            "sla_p1_2026": ["sla", "p1", "phản hồi", "resolution"],
+            "it_helpdesk_faq": ["tài khoản", "đăng nhập", "mật khẩu", "faq"],
+            "hr_leave_policy": ["nghỉ", "phép", "phép năm"],
+        }
+        must_any = doc_keywords.get(doc_id, [])
+        if must_any and (not any(k in t for k in must_any)):
+            quarantine.append(
+                {
+                    **raw,
+                    "reason": "doc_text_mismatch",
+                    "expected_doc_id": doc_id,
+                }
+            )
+            continue
+# #=============================================================
 
         eff_norm, eff_err = _normalize_effective_date(eff_raw)
         if eff_err == "empty_effective_date":
             quarantine.append({**raw, "reason": "missing_effective_date"})
             continue
+
         if eff_err == "invalid_effective_date_format":
             quarantine.append({**raw, "reason": eff_err, "effective_date_raw": eff_raw})
             continue
@@ -110,6 +160,23 @@ def clean_rows(
                 }
             )
             continue
+#==================================================
+        # RULE_NEW_3: effective_date monotonicity within each doc_id
+        # metric_impact: quarantine_reason=non_monotonic_effective_date tăng khi inject date đi lùi
+        prev_eff = last_effective_by_doc.get(doc_id, "")
+        if prev_eff and eff_norm < prev_eff:
+            quarantine.append(
+                {
+                    **raw,
+                    "reason": "non_monotonic_effective_date",
+                    "effective_date_normalized": eff_norm,
+                    "prev_effective_date": prev_eff,
+                }
+            )
+            continue
+        last_effective_by_doc[doc_id] = eff_norm
+#===================================================
+
 
         if not text:
             quarantine.append({**raw, "reason": "missing_chunk_text"})
