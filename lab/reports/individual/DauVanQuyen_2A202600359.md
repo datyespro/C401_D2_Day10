@@ -1,6 +1,6 @@
 # Báo Cáo Cá Nhân — Lab Day 10: Data Pipeline & Observability
 
-**Họ và tên:** Đầu Văn Quyên  
+**Họ và tên:** Đậu Văn Quyền  
 **Vai trò:** Quality / Expectations Owner  
 **Ngày nộp:** 2026-04-15  
 **Mã sinh viên:** 2A202600359
@@ -40,6 +40,7 @@ Quyết định này cân bằng giữa "phát hiện sớm" (warn) và "ngăn c
 **Triệu chứng:** Khi chạy `python etl_pipeline.py run --no-refund-fix --skip-validate --run-id inject-bad`, tôi cần chứng minh rằng expectation có thể **phát hiện được** dữ liệu stale.
 
 **Phát hiện:** Baseline expectation `refund_no_stale_14d_window` đã tồn tại nhưng tôi cần xác nhận nó hoạt động đúng. Chạy inject run, log cho thấy:
+
 ```
 expectation[refund_no_stale_14d_window] FAIL (halt) :: violations=1
 ```
@@ -53,20 +54,24 @@ Tôi ghi rõ lỗi này vào quality report: "Inject scenario proof: expectation
 ## 4. Bằng chứng trước / sau
 
 **Baseline run** (`run_id=2026-04-15T08-03Z`):
+
 ```
 expectation[refund_no_stale_14d_window] OK (halt) :: violations=0
 expectation[chunk_text_no_bom_chars] OK (warn) :: bom_chunks=0
 expectation[effective_date_not_future] OK (halt) :: future_effective_dates=0
 ```
+
 Tất cả expectation pass, pipeline exit 0. Dữ liệu "tốt" được chính thức embed.
 
 **Inject run** (`run_id=inject-bad`):
+
 ```
 expectation[refund_no_stale_14d_window] FAIL (halt) :: violations=1
 expectation[chunk_text_no_bom_chars] OK (warn) :: bom_chunks=0
 expectation[effective_date_not_future] OK (halt) :: future_effective_dates=0
 WARN: expectation failed but --skip-validate → tiếp tục embed
 ```
+
 Expectation refund fail (chứng minh phát hiện được sai lầm), nhưng pipeline vẫn tiếp tục vì `--skip-validate`. Kỹ thuật này cho phép ta demo dữ liệu xấu và so sánh retrieval (Sprint 3).
 
 ---
