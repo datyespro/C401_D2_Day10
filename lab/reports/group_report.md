@@ -36,6 +36,8 @@ python etl_pipeline.py run && python etl_pipeline.py freshness --manifest artifa
 | ---------------------------------------- | -------------------------- | -------------------------- | ------------------------------------- |
 | Expectation: `chunk_text_no_bom_chars`   | `bom_chunks=0`             | `bom_chunks=0` (warn)      | Log baseline run_id=2026-04-15T08-03Z |
 | Expectation: `effective_date_not_future` | `future_effective_dates=0` | `future_effective_dates=0` | Log baseline run_id=2026-04-15T08-03Z |
+| RULE_NEW_2: `doc_text_mismatch`          | `quarantine_records=4`     | `quarantine_records=4`     | Manifest cleanup-refund, detect sai doc_id + chunk content |
+| Fix refund window prune (idempotency)    | `embed_prune_removed=0`    | `embed_prune_removed=1`    | Log cleanup-refund: stale chunk "14 ngày" removed from Chroma |
 
 **Rule chính (baseline + mở rộng):**
 
@@ -51,14 +53,38 @@ Khi dùng cờ `--no-refund-fix --skip-validate`, expectation `refund_no_stale_1
 
 ## 3. Before / after ảnh hưởng retrieval hoặc agent
 
-**Kịch bản inject:**
-Loại bỏ thao tác fix `refund policy` từ rule Clean và bypass Expectation qua Command Sprint 3 nhằm tạo rác Database.
+### 3a. Vấn đề phát hiện (Grading iteration 1)
+
+Từ **grading_run.py** trên run `ci-smoke2` phát hiện: `gq_d10_01` trả về `contains_expected=true` nhưng **`hits_forbidden=true`** ❌
+- **Nguyên nhân:** Vector store Chroma vẫn chứa chunk cũ có text "14 ngày làm việc" trong top-k retrieval
+- **Impact:** Mặc dù LLM agent nhìn thấy câu trả lời đúng (7 ngày), context vẫn chứa deprecated policy → **tiêu chí Merit không đạt**
+- **Chứng cứ:** `artifacts/eval/grading_run.jsonl` trước fix (commit lịch sử)
+
+### 3b. Fix & verification (cleanup-refund run)
+
+**Giải pháp thực hiện:**
+1. Rerun `python etl_pipeline.py run --run-id cleanup-refund`
+   - Expectation `refund_no_stale_14d_window` PASS (violations=0)
+   - Embed upsert idempotent: **`embed_prune_removed=1`** (xóa vector id cũ)
+2. Regenerate grading: `python grading_run.py --out artifacts/eval/grading_run.jsonl`
+3. Verify: `python instructor_quick_check.py --grading artifacts/eval/grading_run.jsonl`
 
 **Kết quả định lượng:**
 
-- Evaluated cho `q_refund_window`:
-- Lần 1 Pipeline (Before): `hits_forbidden` trả ra **no**, Agent không bị ảnh hưởng do Vector DB đã lưu `chunk_text` đúng 7 ngày.
-- Lần 2 Inject (After): Rác bị inject làm `hits_forbidden` thay thành **yes**, Agent trả lời sai "14 ngày làm việc". Rõ ràng Observability pipeline có tác động bảo vệ chất lượng RAG rất lớn!
+| Metric | Lần 1 (Before fix) | Lần 2 (After cleanup-refund) | Δ |
+|--------|-------------------|------------------------------|---|
+| `gq_d10_01: hits_forbidden` | ❌ `true` | ✅ `false` | **FIX** |
+| `gq_d10_02: contains_expected` | ✅ `true` | ✅ `true` | - |
+| `gq_d10_03: top1_doc_matches` | ✅ `true` | ✅ `true` | - |
+| **Hạng nhóm** | ❌ Fail | ✅ **Merit** | **Achievement** |
+
+**Chứng cứ:**
+- Manifest trước/sau: `artifacts/manifests/manifest_ci-smoke2.json` vs `artifacts/manifests/manifest_cleanup-refund.json`
+- Cleaned CSV: `artifacts/cleaned/cleaned_cleanup-refund.csv` (6 records, no stale refund)
+- Grading final: `artifacts/eval/grading_run.jsonl` (all 3 criteria PASS)
+
+### 3c. Kịch bản inject (Sprint 3 - chứng chỉ definition)
+Loại bỏ thao tác fix `refund policy` từ rule Clean và bypass Expectation qua Command Sprint 3 (`--no-refund-fix --skip-validate`) nhằm tạo rác Database để so sánh eval before/after quality degradation.
 
 ---
 
