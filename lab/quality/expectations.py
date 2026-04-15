@@ -112,5 +112,42 @@ def run_expectations(cleaned_rows: List[Dict[str, Any]]) -> Tuple[List[Expectati
         )
     )
 
+    # E7: không còn BOM/zero-width trong chunk_text
+    bom_bad = [r for r in cleaned_rows if any(c in (r.get("chunk_text") or "") for c in ["\ufeff", "\u200b", "\u200c", "\u200d"])]
+    ok7 = len(bom_bad) == 0
+    results.append(
+        ExpectationResult(
+            "chunk_text_no_bom_chars",
+            ok7,
+            "warn",
+            f"bom_chunks={len(bom_bad)}",
+        )
+    )
+
+    # E8: effective_date không được ở tương lai
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).date()
+    future_bad = []
+    for r in cleaned_rows:
+        eff = (r.get("effective_date") or "").strip()
+        if eff:
+            try:
+                eff_date = datetime.fromisoformat(eff).date()
+                if eff_date > today:
+                    future_bad.append(r)
+            except ValueError:
+                # ISO format expectation đã kiểm tra riêng
+                pass
+    ok8 = len(future_bad) == 0
+    results.append(
+        ExpectationResult(
+            "effective_date_not_future",
+            ok8,
+            "halt",
+            f"future_effective_dates={len(future_bad)}",
+        )
+    )
+
     halt = any(not r.passed and r.severity == "halt" for r in results)
     return results, halt
