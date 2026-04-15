@@ -121,7 +121,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     man_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     log(f"manifest_written={man_path.relative_to(ROOT)}")
 
-    status, fdetail = check_manifest_freshness(man_path, sla_hours=float(os.environ.get("FRESHNESS_SLA_HOURS", "24")))
+    status, fdetail = check_manifest_freshness(
+        man_path,
+        sla_hours=float(os.environ.get("FRESHNESS_SLA_HOURS", "24")),
+        watermark_lag_hours=float(os.environ.get("WATERMARK_LAG_HOURS", "2")),
+        clock_skew_hours=float(os.environ.get("CLOCK_SKEW_HOURS", "0.5")),
+        future_tolerance_minutes=float(os.environ.get("FUTURE_TOLERANCE_MINUTES", "5")),
+    )
     log(f"freshness_check={status} {json.dumps(fdetail, ensure_ascii=False)}")
 
     log("PIPELINE_OK")
@@ -183,7 +189,13 @@ def cmd_freshness(args: argparse.Namespace) -> int:
         print(f"manifest not found: {p}", file=sys.stderr)
         return 1
     sla = float(os.environ.get("FRESHNESS_SLA_HOURS", "24"))
-    status, detail = check_manifest_freshness(p, sla_hours=sla)
+    status, detail = check_manifest_freshness(
+        p,
+        sla_hours=sla,
+        watermark_lag_hours=float(os.environ.get("WATERMARK_LAG_HOURS", "2")),
+        clock_skew_hours=float(os.environ.get("CLOCK_SKEW_HOURS", "0.5")),
+        future_tolerance_minutes=float(os.environ.get("FUTURE_TOLERANCE_MINUTES", "5")),
+    )
     print(status, json.dumps(detail, ensure_ascii=False))
     return 0 if status != "FAIL" else 1
 
