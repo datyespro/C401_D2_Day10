@@ -7,3 +7,22 @@ __pycache__/
 chroma_db/
 .pytest_cache/
 *.log
+
+# Artifact outputs — khác nhau mỗi lần chạy, từng thành viên có run_id riêng
+artifacts/logs/
+artifacts/manifests/
+artifacts/quarantine/
+artifacts/cleaned/
+artifacts/eval/
+
+# Python package
+*.egg-info/
+*.egg
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
